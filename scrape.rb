@@ -2,20 +2,46 @@
 
 require 'mechanize'
 require 'cgi'
+require 'mongo'
+
+include Mongo
 
 class WebLand
-  def initialize
+  def initialize(db)
     @agent = Mechanize.new
+    @db = db
   end
 
   def start
-    page = @agent.get search_url(1, 1)
-    places = parsePage page
-    places.each { |place| puts place }
+    (1..47).each do |tdk|
+      scrapePrefecture tdk
+    end
+  end
+
+  def scrapePrefecture(tdk)
+    pageNum = 1
+    loop do
+      page = @agent.get search_url(tdk, pageNum)
+      places = parsePage page, tdk
+
+      puts "==================#{tdk} P.#{pageNum}===================="
+      places.each do |place|
+        puts "#{place[:place_id]} #{place[:price]}"
+        @db.save place
+      end
+
+      nextLink = page.at('//a[contains(text(), "次へ")]')
+      if nextLink
+        pageNum += 1
+        sleep 1
+      else
+        break
+      end
+    end
   end
 
   private
-  def search_url(tdk, page)
+  def search_url(tdk, pageNum)
     endpoint = "http://www.land.mlit.go.jp/landPrice/SearchServlet"
     params = {
       MOD: 2,
@@ -27,7 +53,7 @@ class WebLand
       YOU: '',
       PFR: '',
       PTO: '',
-      PG: page,
+      PG: pageNum,
       LATEST_YEAR: 1
     }
     query = params.map { |k, v| "#{k}=#{v}" }.join('&')
@@ -35,7 +61,7 @@ class WebLand
     "#{endpoint}?#{query}"
   end
 
-  def parsePage(page)
+  def parsePage(page, tdk)
     page.search('.datalist').map do |datalist|
       place = {}
       keys = datalist.css '.dataheader'
@@ -53,7 +79,7 @@ class WebLand
           parseStr(valueNode)
         end
       end
-      createPlace place
+      createPlace place, tdk
     end
   end
 
@@ -73,9 +99,10 @@ class WebLand
     node.xpath('./text()').content
   end
 
-  def createPlace(place)
+  def createPlace(place, tdk)
     {
-      id: place['標準地番号'],
+      tdk: tdk,
+      place_id: place['標準地番号'] || place['基準地番号'],
       date: place['調査基準日'],
       address: place['所在及び地番'],
       residence: place['住居表示'],
@@ -97,4 +124,22 @@ class WebLand
   end
 end
 
-WebLand.new.start
+class Database
+  def initialize
+    @mongo = MongoClient.new
+    @db = @mongo.db 'webland'
+
+    @places = @db.collection 'places'
+    index = { place_id: 1 }
+    @places.ensure_index index
+  end
+
+  def save(doc)
+    query = { place_id: doc[:place_id] }
+    options = { upsert: true }
+    @places.update query, doc, options
+  end
+end
+
+db = Database.new
+WebLand.new(db).start
