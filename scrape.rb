@@ -2,9 +2,8 @@
 
 require 'mechanize'
 require 'cgi'
-require 'mongo'
 
-include Mongo
+require './database'
 
 class WebLand
   def initialize(db)
@@ -71,7 +70,7 @@ class WebLand
         key = key.content.strip
         valueNode = values[index]
         place[key] = case key
-        when '価格(円/m²)', '地積(m²)'
+        when '価格(円/m²)', '価格(円/10a 林地)', '地積(m²)'
           parseNumber(valueNode)
         when '鑑定評価書'
           parseLink(valueNode)
@@ -106,7 +105,7 @@ class WebLand
       date: place['調査基準日'],
       address: place['所在及び地番'],
       residence: place['住居表示'],
-      price: place['価格(円/m²)'],
+      price: place['価格(円/m²)'] || (place['価格(円/10a 林地)'] / 100),
       transportation: place['交通施設、距離'],
       area: place['地積(m²)'],
       shape: place['形状（間口：奥行き）'],
@@ -121,23 +120,6 @@ class WebLand
       urban_plan: place['都市計画区域区分'],
       nature: place['森林法、公園法、自然環境等']
     }
-  end
-end
-
-class Database
-  def initialize
-    @mongo = MongoClient.new
-    @db = @mongo.db 'webland'
-
-    @places = @db.collection 'places'
-    index = { place_id: 1 }
-    @places.ensure_index index
-  end
-
-  def save(doc)
-    query = { place_id: doc[:place_id] }
-    options = { upsert: true }
-    @places.update query, doc, options
   end
 end
 
