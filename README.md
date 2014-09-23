@@ -9,4 +9,5 @@ bundle install
 ruby scrape.rb
 ruby geocode.rb
 ruby export.rb > prices.json
+ruby tobin.rb
 ```
